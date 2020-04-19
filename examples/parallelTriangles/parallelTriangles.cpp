@@ -181,6 +181,7 @@ int main() {
   int height = 800;
   GLFWmonitor *monitor = nullptr;
   auto glfwwindow = glfwCreateWindow(width, height, title, monitor, nullptr);
+  auto glfwwindow2 = glfwCreateWindow(width, height, title, monitor, nullptr);
 
   {
     // Initialise the Vookoo demo framework.
@@ -197,7 +198,7 @@ int main() {
     std::thread wt([&ww] { ww(); });
 
 
-    TestWindowWorker ww2{fw, glfwwindow, title};
+    TestWindowWorker ww2{fw, glfwwindow2, title};
     std::thread wt2([&ww2] { ww2(); });
     // Loop waiting for the window to close.
     while (!glfwWindowShouldClose(glfwwindow)) {
