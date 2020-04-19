@@ -161,7 +161,25 @@ public:
   const vk::PipelineCache pipelineCache() const { return *pipelineCache_; }
 
   /// Get the default descriptor pool (you can use your own if you like).
-  const vk::DescriptorPool descriptorPool() const { return *descriptorPool_; }
+  const vk::DescriptorPool descriptorPool() const {
+    auto makeDescPool = [this] {
+      std::vector<vk::DescriptorPoolSize> poolSizes;
+      poolSizes.emplace_back(vk::DescriptorType::eUniformBuffer, 128);
+      poolSizes.emplace_back(vk::DescriptorType::eCombinedImageSampler, 128);
+      poolSizes.emplace_back(vk::DescriptorType::eStorageBuffer, 128);
+
+      // Create an arbitrary number of descriptors in a pool.
+      // Allow the descriptors to be freed, possibly not optimal behaviour.
+      vk::DescriptorPoolCreateInfo descriptorPoolInfo{};
+      descriptorPoolInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
+      descriptorPoolInfo.maxSets = 256;
+      descriptorPoolInfo.poolSizeCount = (uint32_t)poolSizes.size();
+      descriptorPoolInfo.pPoolSizes = poolSizes.data();
+      return device_->createDescriptorPoolUnique(descriptorPoolInfo);
+    };
+    thread_local vk::UniqueDescriptorPool desc_pool = makeDescPool();
+    return *desc_pool;
+  }
 
   /// Get the family index for the graphics queues.
   uint32_t graphicsQueueFamilyIndex() const { return graphicsQueueFamilyIndex_; }
