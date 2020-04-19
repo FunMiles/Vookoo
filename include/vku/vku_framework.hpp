@@ -446,6 +446,8 @@ public:
   /// Queue the static command buffer for the next image in the swap chain. Optionally call a function to create a dynamic command buffer
   /// for uploading textures, changing uniforms etc.
   void draw(const vk::Device &device, const vk::Queue &graphicsQueue, const std::function<void (vk::CommandBuffer cb, int imageIndex, vk::RenderPassBeginInfo &rpbi)> &dynamic = defaultRenderFunc) {
+    static std::mutex mtx;
+    std::lock_guard<std::mutex> lg{mtx};
     static auto start = std::chrono::high_resolution_clock::now();
     auto time = std::chrono::high_resolution_clock::now();
     auto delta = time - start;

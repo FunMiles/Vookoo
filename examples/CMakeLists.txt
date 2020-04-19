@@ -56,6 +56,7 @@ function(example order exname)
   endif(APPLE)
 endfunction(example)
 
+example(00 parallelTriangles parallelTriangles.vert parallelTriangles.frag)
 example(01 helloTriangle helloTriangle.vert helloTriangle.frag)
 example(02 pushConstants pushConstants.vert pushConstants.frag)
 example(03 uniforms uniforms.vert uniforms.frag)
