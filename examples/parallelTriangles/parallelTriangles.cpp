@@ -5,7 +5,7 @@
 // This is a simple introduction to the vulkan C++ interface by way of Vookoo
 // which is a layer to make creating Vulkan resources easy.
 //
-
+#include <atomic>
 // Include the demo framework, vookoo (vku) for building objects and glm for maths.
 // The demo framework uses GLFW to create windows.
 #include <vku/vku_framework.hpp>

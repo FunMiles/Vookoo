@@ -45,6 +45,7 @@
 #include <chrono>
 #include <functional>
 #include <cstddef>
+#include <mutex>
 
 #include <vulkan/vulkan.hpp>
 #include <vku/vku.hpp>
