@@ -133,7 +133,7 @@ public:
 
   template <typename Dispatch=VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
   vk::Result presentKHR(const vk::PresentInfoKHR &presentInfo, Dispatch const &d = Dispatch{}) const {
-    this->operator->()->presentKHR(presentInfo, d);
+    return this->operator->()->presentKHR(presentInfo, d);
   }
 };
 
@@ -376,10 +376,12 @@ public:
     init(instance, device, physicalDevice, graphicsQueueFamilyIndex, surface);
   }
 
+  Window(const Window &) = delete;
+  Window(Window &&) = default;
+
+
   void init(const vk::Instance &instance, const vk::Device &device, const vk::PhysicalDevice &physicalDevice, uint32_t graphicsQueueFamilyIndex, vk::SurfaceKHR surface) {
-    //surface_ = vk::UniqueSurfaceKHR(surface);
-    //surface_ = vk::UniqueSurfaceKHR(surface, vk::SurfaceKHRDeleter{ instance });
-    surface_ = surface;
+    surface_ = vk::UniqueSurfaceKHR(surface, { instance });
     graphicsQueueFamilyIndex_ = graphicsQueueFamilyIndex;
     physicalDevice_ = physicalDevice;
     instance_ = instance;
@@ -390,7 +392,7 @@ public:
     bool found = false;
     for (uint32_t qi = 0; qi != qprops.size(); ++qi) {
       auto &qprop = qprops[qi];
-      if (pd.getSurfaceSupportKHR(qi, surface_) && (qprop.queueFlags & vk::QueueFlagBits::eGraphics) == vk::QueueFlagBits::eGraphics) {
+      if (pd.getSurfaceSupportKHR(qi, *surface_) && (qprop.queueFlags & vk::QueueFlagBits::eGraphics) == vk::QueueFlagBits::eGraphics) {
         presentQueueFamily_ = qi;
         found = true;
         break;
@@ -404,7 +406,7 @@ public:
 
     presentQueue_ = Framework::getQueue(device_, presentQueueFamily_, 0);
 
-    auto fmts = pd.getSurfaceFormatsKHR(surface_);
+    auto fmts = pd.getSurfaceFormatsKHR(*surface_);
     swapchainImageFormat_ = fmts[0].format;
     swapchainColorSpace_ = fmts[0].colorSpace;
     if (fmts.size() == 1 && swapchainImageFormat_ == vk::Format::eUndefined) {
@@ -464,7 +466,7 @@ public:
 	/// Dump the capabilities of the physical device used by this window.
   void dumpCaps(std::ostream &os, vk::PhysicalDevice pd) const {
     os << "Surface formats\n";
-    auto fmts = pd.getSurfaceFormatsKHR(surface_);
+    auto fmts = pd.getSurfaceFormatsKHR(*surface_);
     for (auto &fmt : fmts) {
       auto fmtstr = vk::to_string(fmt.format);
       auto cstr = vk::to_string(fmt.colorSpace);
@@ -472,7 +474,7 @@ public:
     }
 
     os << "Present Modes\n";
-    auto presentModes = pd.getSurfacePresentModesKHR(surface_);
+    auto presentModes = pd.getSurfacePresentModesKHR(*surface_);
     for (auto pm : presentModes) {
       std::cout << vk::to_string(pm) << "\n";
     }
@@ -612,9 +614,8 @@ public:
       device_.destroyFence(f);
     }
     swapchain_ = vk::UniqueSwapchainKHR{};
-    instance_.destroySurfaceKHR(surface_);
   }
-
+  Window &operator=(const Window &) = delete;
   Window &operator=(Window &&rhs) = default;
 
   /// Return the width of the display.
@@ -658,7 +659,7 @@ public:
 
   /// Create a new swapchain and destroy the previous one if any.
   void createSwapchain() {
-    auto pms = physicalDevice_.getSurfacePresentModesKHR(surface_);
+    auto pms = physicalDevice_.getSurfacePresentModesKHR(*surface_);
     vk::PresentModeKHR presentMode = pms[0];
     if (std::find(pms.begin(), pms.end(), vk::PresentModeKHR::eFifo) !=
         pms.end()) {
@@ -668,7 +669,7 @@ public:
       return;
     }
 
-    auto surfaceCaps = physicalDevice_.getSurfaceCapabilitiesKHR(surface_);
+    auto surfaceCaps = physicalDevice_.getSurfaceCapabilitiesKHR(*surface_);
     width_ = surfaceCaps.currentExtent.width;
     height_ = surfaceCaps.currentExtent.height;
     vk::SwapchainCreateInfoKHR swapinfo{};
@@ -678,7 +679,7 @@ public:
     vk::SharingMode sharingMode = !sameQueues ? vk::SharingMode::eConcurrent
                                               : vk::SharingMode::eExclusive;
     swapinfo.imageExtent = surfaceCaps.currentExtent;
-    swapinfo.surface = surface_;
+    swapinfo.surface = *surface_;
     swapinfo.minImageCount = surfaceCaps.minImageCount + 1;
     swapinfo.imageFormat = swapchainImageFormat_;
     swapinfo.imageColorSpace = swapchainColorSpace_;
@@ -785,7 +786,7 @@ private:
   vk::Instance instance_;
   vk::PhysicalDevice physicalDevice_;
   uint32_t graphicsQueueFamilyIndex_;
-  vk::SurfaceKHR surface_;
+  vk::UniqueSurfaceKHR surface_;
   vk::UniqueSwapchainKHR swapchain_;
   vk::UniqueRenderPass renderPass_;
   vk::UniqueSemaphore imageAcquireSemaphore_;
