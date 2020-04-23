@@ -59,6 +59,17 @@ class locked_access {
 public:
   locked_access(T t, std::mutex &mtx) : t(t), lg(mtx) {}
   const T *operator->() const { return &t; }
+private:
+  T t;
+  std::lock_guard<std::mutex> lg;
+};
+
+template <typename T>
+class locked_deref {
+public:
+  locked_deref(T t, std::mutex &mtx) : t(t), lg(mtx) {}
+  operator const T &() { return t; }
+private:
   T t;
   std::lock_guard<std::mutex> lg;
 };
@@ -70,8 +81,28 @@ public:
   synchronized_ref() : t{}, mtx{nullptr} {}
 
   locked_access<T> operator->() const { return {t, *mtx}; }
+  locked_deref<T> operator*() const { return {t, *mtx}; }
+private:
   T t;
   std::mutex *mtx;
+};
+
+class SynchronizedQueue : public synchronized_ref<vk::Queue> {
+public:
+  using synchronized_ref<vk::Queue>::synchronized_ref;
+  template <typename Dispatch=VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
+  void submit(uint32_t submitCount, const vk::SubmitInfo *submits, vk::Fence fence, Dispatch const &d = Dispatch{}) const {
+    this->operator->()->submit(submitCount, submits, fence, d);
+  }
+  template <typename Dispatch=VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
+  void submit(vk::ArrayProxy<const vk::SubmitInfo> submits, vk::Fence fence, Dispatch const &d = Dispatch{}) const {
+    this->operator->()->submit(submits, fence, d);
+  }
+
+  template <typename Dispatch=VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
+  vk::Result presentKHR(const vk::PresentInfoKHR &presentInfo, Dispatch const &d = Dispatch{}) const {
+    this->operator->()->presentKHR(presentInfo, d);
+  }
 };
 
 /// This class provides an optional interface to the vulkan instance, devices and queues.
@@ -173,7 +204,7 @@ public:
   const vk::Device device() const { return *device_; }
 
   /// Get the queue used to submit graphics jobs
-  synchronized_ref<vk::Queue> graphicsQueue() const {
+  SynchronizedQueue graphicsQueue() const {
     return graphicsQueue_;
   }
 
@@ -239,10 +270,10 @@ public:
   /// Returns true if the Framework has been built correctly.
   bool ok() const { return ok_; }
 
-  static synchronized_ref<vk::Queue> getQueue(vk::Device device, uint32_t queueFamily, uint32_t queueIndex)
+  static SynchronizedQueue getQueue(vk::Device device, uint32_t queueFamily, uint32_t queueIndex)
   {
     using Request = std::tuple<vk::Device, uint32_t, uint32_t>;
-    static std::map<Request, synchronized_ref<vk::Queue>> allQueues;
+    static std::map<Request, SynchronizedQueue> allQueues;
     static std::mutex mtx;
     std::lock_guard<std::mutex> lg(mtx);
     auto it = allQueues.find({device, queueFamily, queueIndex});
@@ -264,8 +295,8 @@ private:
   vk::UniqueDescriptorPool descriptorPool_;
   uint32_t graphicsQueueFamilyIndex_;
   uint32_t computeQueueFamilyIndex_;
-  synchronized_ref<vk::Queue> graphicsQueue_;
-  synchronized_ref<vk::Queue> computeQueue_;
+  SynchronizedQueue graphicsQueue_;
+  SynchronizedQueue computeQueue_;
   vk::PhysicalDeviceMemoryProperties memprops_;
   bool ok_ = false;
 };
@@ -329,7 +360,7 @@ public:
       return;
     }
 
-    presentQueue_ = device_.getQueue(presentQueueFamily_, 0);
+    presentQueue_ = Framework::getQueue(device_, presentQueueFamily_, 0);
 
     auto fmts = pd.getSurfaceFormatsKHR(surface_);
     swapchainImageFormat_ = fmts[0].format;
@@ -509,10 +540,7 @@ public:
 
   /// Queue the static command buffer for the next image in the swap chain. Optionally call a function to create a dynamic command buffer
   /// for uploading textures, changing uniforms etc.
-  void draw(const vk::Device &device, synchronized_ref<vk::Queue> graphicsQueue, const std::function<void (vk::CommandBuffer cb, int imageIndex, vk::RenderPassBeginInfo &rpbi)> &dynamic = defaultRenderFunc) {
-//    static std::mutex mtx;
-//    std::lock_guard<std::mutex> lg{mtx};
-////    std::lock_guard<std::mutex> lg(gl_mtx);
+  void draw(const vk::Device &device, SynchronizedQueue graphicsQueue, const std::function<void (vk::CommandBuffer cb, int imageIndex, vk::RenderPassBeginInfo &rpbi)> &dynamic = defaultRenderFunc) {
     static auto start = std::chrono::high_resolution_clock::now();
     auto time = std::chrono::high_resolution_clock::now();
     auto delta = time - start;
@@ -546,24 +574,24 @@ public:
     rpbi.pClearValues = clearColours.data();
     dynamic(pscb, imageIndex, rpbi);
 
-    vk::SubmitInfo submit;
-    submit.waitSemaphoreCount = 1;
-    submit.pWaitSemaphores = &iaSema;
-    submit.pWaitDstStageMask = &waitStages;
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &pscb;
-    submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores = &psSema;
-    graphicsQueue->submit(1, &submit, vk::Fence{});
+    vk::SubmitInfo dynamicSubmit;
+    dynamicSubmit.waitSemaphoreCount = 1;
+    dynamicSubmit.pWaitSemaphores = &iaSema;
+    dynamicSubmit.pWaitDstStageMask = &waitStages;
+    dynamicSubmit.commandBufferCount = 1;
+    dynamicSubmit.pCommandBuffers = &pscb;
+    dynamicSubmit.signalSemaphoreCount = 1;
+    dynamicSubmit.pSignalSemaphores = &psSema;
 
-    submit.waitSemaphoreCount = 1;
-    submit.pWaitSemaphores = &psSema;
-    submit.pWaitDstStageMask = &waitStages;
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &cb;
-    submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores = &ccSema;
-    graphicsQueue->submit(1, &submit, cbFence);
+    vk::SubmitInfo staticSubmit{};
+    staticSubmit.waitSemaphoreCount = 1;
+    staticSubmit.pWaitSemaphores = &psSema;
+    staticSubmit.pWaitDstStageMask = &waitStages;
+    staticSubmit.commandBufferCount = 1;
+    staticSubmit.pCommandBuffers = &cb;
+    staticSubmit.signalSemaphoreCount = 1;
+    staticSubmit.pSignalSemaphores = &ccSema;
+    graphicsQueue.submit({dynamicSubmit,staticSubmit}, cbFence);
 
     vk::PresentInfoKHR presentInfo;
     vk::SwapchainKHR swapchain = *swapchain_;
@@ -572,15 +600,15 @@ public:
     presentInfo.pImageIndices = &imageIndex;
     presentInfo.waitSemaphoreCount = 1;
     presentInfo.pWaitSemaphores = &ccSema;
-    presentQueue()->presentKHR(presentInfo);
+    presentQueue_.presentKHR(presentInfo);
   }
 
   /// Return the queue family index used to present the surface to the display.
   uint32_t presentQueueFamily() const { return presentQueueFamily_; }
 
   /// Get the queue used to submit graphics jobs
-  synchronized_ref<vk::Queue> presentQueue() const {
-    return Framework::getQueue(device_, presentQueueFamily_, 0);
+  SynchronizedQueue presentQueue() const {
+    return presentQueue_;
   }
 
   /// Return true if this window was created sucessfully.
@@ -664,7 +692,7 @@ private:
   vku::DepthStencilImage depthStencilImage_;
 
   uint32_t presentQueueFamily_ = 0;
-  vk::Queue presentQueue_;
+  SynchronizedQueue presentQueue_;
   uint32_t width_;
   uint32_t height_;
   vk::Format swapchainImageFormat_ = vk::Format::eB8G8R8A8Unorm;

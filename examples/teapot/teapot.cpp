@@ -238,7 +238,7 @@ int main() {
     cubeBytes = std::vector<uint8_t>{};
 
     // Copy the staging buffer to the GPU texture and set the layout.
-    vku::executeImmediately(device, window.commandPool(), fw.graphicsQueue(), [&](vk::CommandBuffer cb) {
+    vku::executeImmediately(device, window.commandPool(), *fw.graphicsQueue(), [&](vk::CommandBuffer cb) {
       vk::Buffer buf = stagingBuffer.buffer();
       for (uint32_t mipLevel = 0; mipLevel != ktx.mipLevels(); ++mipLevel) {
         auto width = ktx.width(mipLevel); 

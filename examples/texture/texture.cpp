@@ -73,7 +73,7 @@ int main() {
   Uniform uniform;
   uniform.colour = glm::vec4(0, 1, 1, 1);
   vku::UniformBuffer ubo(fw.device(), fw.memprops(), sizeof(Uniform));
-  ubo.upload(device, fw.memprops(), window.commandPool(), fw.graphicsQueue(), uniform);
+  ubo.upload(device, fw.memprops(), window.commandPool(), *fw.graphicsQueue(), uniform);
 
   auto renderPass = window.renderPass();
   auto &cache = fw.pipelineCache();
@@ -85,7 +85,7 @@ int main() {
 
   vku::TextureImage2D texture{device, fw.memprops(), 2, 2, 1, vk::Format::eR8G8B8A8Unorm};
   std::vector<uint8_t> pixels = { 0xff, 0xff, 0xff, 0xff,  0x00, 0xff, 0xff, 0xff,  0xff, 0x00, 0xff, 0xff,  0xff, 0xff, 0x00, 0xff, };
-  texture.upload(device, pixels, window.commandPool(), fw.memprops(), fw.graphicsQueue());
+  texture.upload(device, pixels, window.commandPool(), fw.memprops(), *fw.graphicsQueue());
 
   ////////////////////////////////////////
   //
