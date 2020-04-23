@@ -102,7 +102,8 @@ int main() {
     u.colour = glm::vec4{1, 1, 1, 1};
     u.rotation = glm::mat4{1};
     int frame = 0;
-
+    auto ww = window.width();
+    auto wh = window.height();
     // Loop waiting for the window to close.
     while (!glfwWindowShouldClose(glfwwindow)) {
       glfwPollEvents();
@@ -118,8 +119,6 @@ int main() {
       window.draw(
         device, fw.graphicsQueue(),
         [&](vk::CommandBuffer cb, int imageIndex, vk::RenderPassBeginInfo &rpbi) {
-          static auto ww = window.width();
-          static auto wh = window.height();
           if (ww != window.width() || wh != window.height()) {
             ww = window.width();
             wh = window.height();

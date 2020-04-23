@@ -84,13 +84,14 @@ int main() {
         };
     auto pipeline = buildPipeline();
 
+    auto ww = window.width();
+    auto wh = window.height();
     // We only need to create the command buffer(s) once.
     // This simple function lets us do that.
-    window.setStaticCommands([&pipeline, &buffer, &window, &buildPipeline](
+    window.setStaticCommands([&](
                                  vk::CommandBuffer cb, int imageIndex,
                                  vk::RenderPassBeginInfo &rpbi) {
-      static auto ww = window.width();
-      static auto wh = window.height();
+
       if (ww != window.width() || wh != window.height()) {
         ww = window.width();
         wh = window.height();

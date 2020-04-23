@@ -130,7 +130,8 @@ int main() {
     update.beginBuffers(0, 0, vk::DescriptorType::eUniformBuffer);
     update.buffer(ubo.buffer(), 0, sizeof(Uniform));
     update.update(device);
-
+    auto ww = window.width();
+    auto wh = window.height();
     // Loop waiting for the window to close.
     while (!glfwWindowShouldClose(glfwwindow)) {
       glfwPollEvents();
@@ -139,15 +140,12 @@ int main() {
       u.colour.r = std::sin(frame * 0.01f);
       u.colour.g = std::cos(frame * 0.01f);
       frame++;
-
       // draw one triangle.
       // Unlike helloTriangle, we generate the command buffer dynamicly
       // because it will contain different values on each frame.
       window.draw(
         device, fw.graphicsQueue(),
         [&](vk::CommandBuffer cb, int imageIndex, vk::RenderPassBeginInfo &rpbi) {
-          static auto ww = window.width();
-          static auto wh = window.height();
           if (ww != window.width() || wh != window.height()) {
             ww = window.width();
             wh = window.height();
