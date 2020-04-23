@@ -46,10 +46,10 @@ struct TestWindowWorker {
 
 void TestWindowWorker::operator()()
 {
-  // Create two shaders, vertex and fragment. See the files uniforms.vert
-  // and uniforms.frag for details.
-  vku::ShaderModule vert_{device, BINARY_DIR "uniforms.vert.spv"};
-  vku::ShaderModule frag_{device, BINARY_DIR "uniforms.frag.spv"};
+  // Create two shaders, vertex and fragment. See the files
+  // uniparallelTrianglesforms.vert and parallelTriangles.frag for details.
+  vku::ShaderModule vert_{device, BINARY_DIR "parallelTriangles.vert.spv"};
+  vku::ShaderModule frag_{device, BINARY_DIR "parallelTriangles.frag.spv"};
 
   // These are the parameters we are passing to the shaders
   // Note! be very careful when using vec3, vec2, float and vec4 together
@@ -119,47 +119,45 @@ void TestWindowWorker::operator()()
   update.buffer(ubo.buffer(), 0, sizeof(Uniform));
   update.update(device);
 
+  auto graphicsQueue = fw.graphicsQueue();
   while (!finished) {
     u.rotation = glm::rotate(u.rotation, glm::radians(1.0f), glm::vec3(0, 0, 1));
     u.colour.r = std::sin(frame * 0.01f);
     u.colour.g = std::cos(frame * 0.01f);
     frame++;
+    {
+//      std::lock_guard<std::mutex> lg(gl_mtx);
+      // draw one triangle.
+      // Unlike helloTriangle, we generate the command buffer dynamicly
+      // because it will contain different values on each frame.
+      window.draw(
+          device, graphicsQueue,
+          [&](vk::CommandBuffer cb, int imageIndex,
+              vk::RenderPassBeginInfo &rpbi) {
+            vk::CommandBufferBeginInfo bi{};
+            cb.begin(bi);
+            // Instead of pushConstants() we use updateBuffer()
+            // This has an effective max of about 64k.
+            // Like pushConstants(), this takes a copy of the uniform buffer
+            // at the time we create this command buffer.
+            cb.updateBuffer(ubo.buffer(), 0, sizeof(u), (const void *)&u);
+            // We may or may not need this barrier. It is probably a good precaution.
+            ubo.barrier(cb, vk::PipelineStageFlagBits::eHost,
+                        vk::PipelineStageFlagBits::eTopOfPipe,
+                        vk::DependencyFlagBits::eByRegion, {}, {}, qfi, qfi);
+            // Unlike in the pushConstants example, we need to bind descriptor sets to tell the shader where to find our buffer.
+            cb.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                                  *pipelineLayout_, 0, sets[0], nullptr);
 
-    // draw one triangle.
-    // Unlike helloTriangle, we generate the command buffer dynamicly
-    // because it will contain different values on each frame.
-    window.draw(
-        device, fw.graphicsQueue(),
-        [&](vk::CommandBuffer cb, int imageIndex, vk::RenderPassBeginInfo &rpbi) {
-          vk::CommandBufferBeginInfo bi{};
-          cb.begin(bi);
-          // Instead of pushConstants() we use updateBuffer()
-          // This has an effective max of about 64k.
-          // Like pushConstants(), this takes a copy of the uniform buffer
-          // at the time we create this command buffer.
-          cb.updateBuffer(
-              ubo.buffer(), 0, sizeof(u), (const void*)&u
-          );
-          // We may or may not need this barrier. It is probably a good precaution.
-          ubo.barrier(
-              cb, vk::PipelineStageFlagBits::eHost, vk::PipelineStageFlagBits::eTopOfPipe,
-              vk::DependencyFlagBits::eByRegion,
-              {}, {},
-              qfi, qfi
-          );
-          // Unlike in the pushConstants example, we need to bind descriptor sets
-          // to tell the shader where to find our buffer.
-          cb.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *pipelineLayout_, 0, sets[0], nullptr);
+            cb.beginRenderPass(rpbi, vk::SubpassContents::eInline);
+            cb.bindPipeline(vk::PipelineBindPoint::eGraphics, *pipeline);
 
-          cb.beginRenderPass(rpbi, vk::SubpassContents::eInline);
-          cb.bindPipeline(vk::PipelineBindPoint::eGraphics, *pipeline);
-
-          cb.bindVertexBuffers(0, buffer.buffer(), vk::DeviceSize(0));
-          cb.draw(3, 1, 0, 0);
-          cb.endRenderPass();
-          cb.end();
-        }
-    );
+            cb.bindVertexBuffers(0, buffer.buffer(), vk::DeviceSize(0));
+            cb.draw(3, 1, 0, 0);
+            cb.endRenderPass();
+            cb.end();
+          });
+    }
 
     // Very crude method to prevent your GPU from overheating.
     std::this_thread::sleep_for(std::chrono::milliseconds(16));
@@ -175,7 +173,7 @@ int main() {
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
   // Make a window
-  const char *title = "uniforms";
+  const char *title = "Parallel Triangle";
   bool fullScreen = false;
   int width = 800;
   int height = 800;

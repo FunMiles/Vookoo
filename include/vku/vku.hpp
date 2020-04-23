@@ -58,7 +58,8 @@ inline int findMemoryTypeIndex(const vk::PhysicalDeviceMemoryProperties &memprop
 }
 
 /// Execute commands immediately and wait for the device to finish.
-inline void executeImmediately(vk::Device device, vk::CommandPool commandPool, vk::Queue queue, const std::function<void (vk::CommandBuffer cb)> &func) {
+inline void executeImmediately(vk::Device device, vk::CommandPool commandPool,
+                               vk::Queue queue, const std::function<void (vk::CommandBuffer cb)> &func) {
   vk::CommandBufferAllocateInfo cbai{ commandPool, vk::CommandBufferLevel::ePrimary, 1 };
 
   auto cbs = device.allocateCommandBuffers(cbai);
@@ -601,6 +602,7 @@ public:
   ShaderModule(const vk::Device &device, const std::string &filename) {
     auto file = std::ifstream(filename, std::ios::binary);
     if (file.bad()) {
+      std::cerr << "Could not open " << filename << std::endl;
       return;
     }
 

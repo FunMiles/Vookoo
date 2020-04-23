@@ -46,11 +46,42 @@
 #include <functional>
 #include <cstddef>
 #include <mutex>
+#include <map>
 
 #include <vulkan/vulkan.hpp>
 #include <vku/vku.hpp>
 
 namespace vku {
+
+template <typename T>
+class locked_access {
+public:
+  locked_access(T t, std::mutex &mtx) : t(t), lg(mtx) {}
+  const T *operator->() const { return &t; }
+  T t;
+  std::lock_guard<std::mutex> lg;
+};
+
+template <typename T>
+class synchronized {
+public:
+  template <typename...Arg>
+  synchronized(Arg&&...a) : t(std::forward<Arg>(a)...) {}
+
+  locked_access<T> operator->() const { return {t, mtx}; }
+  T t;
+  std::mutex mtx;
+};
+
+template <typename T>
+class synchronized_ref {
+public:
+  synchronized_ref(T t, std::mutex &mtx) : t(t), mtx{mtx} {}
+
+  locked_access<T> operator->() const { return {t, mtx}; }
+  T t;
+  std::mutex &mtx;
+};
 
 /// This class provides an optional interface to the vulkan instance, devices and queues.
 /// It is not used by any of the other classes directly and so can be safely ignored if Vookoo
@@ -96,7 +127,7 @@ public:
     }
 
     if (graphicsQueueFamilyIndex_ == badQueue || computeQueueFamilyIndex_ == badQueue) {
-      std::cout << "oops, missing a queue\n";
+      std::cerr << "oops, missing a queue\n";
       return;
     }
 
@@ -128,6 +159,8 @@ public:
     descriptorPoolInfo.pPoolSizes = poolSizes.data();
     descriptorPool_ = device_->createDescriptorPoolUnique(descriptorPoolInfo);
 
+    graphicsQueue_ = device_->getQueue(graphicsQueueFamilyIndex_, 0);
+    computeQueue_  = device_->getQueue(computeQueueFamilyIndex_, 0);;
     ok_ = true;
   }
 
@@ -149,7 +182,10 @@ public:
   const vk::Device device() const { return *device_; }
 
   /// Get the queue used to submit graphics jobs
-  const vk::Queue graphicsQueue() const { return device_->getQueue(graphicsQueueFamilyIndex_, 0); }
+  synchronized_ref<vk::Queue> graphicsQueue() const {
+    auto queue = graphicsQueue_;
+    return { queue, Framework::getMutexForQueue(queue) };
+  }
 
   /// Get the queue used to submit compute jobs
   const vk::Queue computeQueue() const { return device_->getQueue(computeQueueFamilyIndex_, 0); }
@@ -213,6 +249,17 @@ public:
   /// Returns true if the Framework has been built correctly.
   bool ok() const { return ok_; }
 
+  static std::mutex &getMutexForQueue(vk::Queue queue) {
+    static std::map<vk::Queue, std::unique_ptr<std::mutex>> mutexMap;
+    static std::mutex mtx;
+    std::lock_guard<std::mutex> lg(mtx);
+    auto it = mutexMap.find(queue);
+    if(it == mutexMap.end()) {
+      it = mutexMap.insert({queue, std::unique_ptr<std::mutex>(new std::mutex)})
+               .first;
+    }
+    return *it->second;
+  }
 private:
   vk::UniqueInstance instance_;
   vku::DebugCallback callback_;
@@ -223,6 +270,8 @@ private:
   vk::UniqueDescriptorPool descriptorPool_;
   uint32_t graphicsQueueFamilyIndex_;
   uint32_t computeQueueFamilyIndex_;
+  vk::Queue graphicsQueue_;
+  vk::Queue computeQueue_;
   vk::PhysicalDeviceMemoryProperties memprops_;
   bool ok_ = false;
 };
@@ -282,9 +331,11 @@ public:
     }
 
     if (!found) {
-      std::cout << "No Vulkan present queues found\n";
+      std::cerr << "No Vulkan present queues found\n";
       return;
     }
+
+    presentQueue_ = device_.getQueue(presentQueueFamily_, 0);
 
     auto fmts = pd.getSurfaceFormatsKHR(surface_);
     swapchainImageFormat_ = fmts[0].format;
@@ -464,9 +515,10 @@ public:
 
   /// Queue the static command buffer for the next image in the swap chain. Optionally call a function to create a dynamic command buffer
   /// for uploading textures, changing uniforms etc.
-  void draw(const vk::Device &device, const vk::Queue &graphicsQueue, const std::function<void (vk::CommandBuffer cb, int imageIndex, vk::RenderPassBeginInfo &rpbi)> &dynamic = defaultRenderFunc) {
-    static std::mutex mtx;
-    std::lock_guard<std::mutex> lg{mtx};
+  void draw(const vk::Device &device, synchronized_ref<vk::Queue> graphicsQueue, const std::function<void (vk::CommandBuffer cb, int imageIndex, vk::RenderPassBeginInfo &rpbi)> &dynamic = defaultRenderFunc) {
+//    static std::mutex mtx;
+//    std::lock_guard<std::mutex> lg{mtx};
+////    std::lock_guard<std::mutex> lg(gl_mtx);
     static auto start = std::chrono::high_resolution_clock::now();
     auto time = std::chrono::high_resolution_clock::now();
     auto delta = time - start;
@@ -508,7 +560,7 @@ public:
     submit.pCommandBuffers = &pscb;
     submit.signalSemaphoreCount = 1;
     submit.pSignalSemaphores = &psSema;
-    graphicsQueue.submit(1, &submit, vk::Fence{});
+    graphicsQueue->submit(1, &submit, vk::Fence{});
 
     submit.waitSemaphoreCount = 1;
     submit.pWaitSemaphores = &psSema;
@@ -517,7 +569,7 @@ public:
     submit.pCommandBuffers = &cb;
     submit.signalSemaphoreCount = 1;
     submit.pSignalSemaphores = &ccSema;
-    graphicsQueue.submit(1, &submit, cbFence);
+    graphicsQueue->submit(1, &submit, cbFence);
 
     vk::PresentInfoKHR presentInfo;
     vk::SwapchainKHR swapchain = *swapchain_;
@@ -526,14 +578,16 @@ public:
     presentInfo.pImageIndices = &imageIndex;
     presentInfo.waitSemaphoreCount = 1;
     presentInfo.pWaitSemaphores = &ccSema;
-    presentQueue().presentKHR(presentInfo);
+    presentQueue()->presentKHR(presentInfo);
   }
 
   /// Return the queue family index used to present the surface to the display.
   uint32_t presentQueueFamily() const { return presentQueueFamily_; }
 
   /// Get the queue used to submit graphics jobs
-  const vk::Queue presentQueue() const { return device_.getQueue(presentQueueFamily_, 0); }
+  synchronized_ref<vk::Queue> presentQueue() const {
+    return { presentQueue_, Framework::getMutexForQueue(presentQueue_) };
+  }
 
   /// Return true if this window was created sucessfully.
   bool ok() const { return ok_; }
@@ -616,6 +670,7 @@ private:
   vku::DepthStencilImage depthStencilImage_;
 
   uint32_t presentQueueFamily_ = 0;
+  vk::Queue presentQueue_;
   uint32_t width_;
   uint32_t height_;
   vk::Format swapchainImageFormat_ = vk::Format::eB8G8R8A8Unorm;
