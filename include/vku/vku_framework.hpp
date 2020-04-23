@@ -47,6 +47,7 @@
 #include <cstddef>
 #include <mutex>
 #include <map>
+#include <tuple>
 
 #include <vulkan/vulkan.hpp>
 #include <vku/vku.hpp>
@@ -63,24 +64,14 @@ public:
 };
 
 template <typename T>
-class synchronized {
-public:
-  template <typename...Arg>
-  synchronized(Arg&&...a) : t(std::forward<Arg>(a)...) {}
-
-  locked_access<T> operator->() const { return {t, mtx}; }
-  T t;
-  std::mutex mtx;
-};
-
-template <typename T>
 class synchronized_ref {
 public:
-  synchronized_ref(T t, std::mutex &mtx) : t(t), mtx{mtx} {}
+  synchronized_ref(T t, std::mutex *mtx) : t(t), mtx{mtx} {}
+  synchronized_ref() : t{}, mtx{nullptr} {}
 
-  locked_access<T> operator->() const { return {t, mtx}; }
+  locked_access<T> operator->() const { return {t, *mtx}; }
   T t;
-  std::mutex &mtx;
+  std::mutex *mtx;
 };
 
 /// This class provides an optional interface to the vulkan instance, devices and queues.
@@ -159,8 +150,8 @@ public:
     descriptorPoolInfo.pPoolSizes = poolSizes.data();
     descriptorPool_ = device_->createDescriptorPoolUnique(descriptorPoolInfo);
 
-    graphicsQueue_ = device_->getQueue(graphicsQueueFamilyIndex_, 0);
-    computeQueue_  = device_->getQueue(computeQueueFamilyIndex_, 0);;
+    graphicsQueue_ = Framework::getQueue(*device_, graphicsQueueFamilyIndex_, 0);
+    computeQueue_  = Framework::getQueue(*device_, computeQueueFamilyIndex_, 0);;
     ok_ = true;
   }
 
@@ -183,8 +174,7 @@ public:
 
   /// Get the queue used to submit graphics jobs
   synchronized_ref<vk::Queue> graphicsQueue() const {
-    auto queue = graphicsQueue_;
-    return { queue, Framework::getMutexForQueue(queue) };
+    return graphicsQueue_;
   }
 
   /// Get the queue used to submit compute jobs
@@ -249,17 +239,21 @@ public:
   /// Returns true if the Framework has been built correctly.
   bool ok() const { return ok_; }
 
-  static std::mutex &getMutexForQueue(vk::Queue queue) {
-    static std::map<vk::Queue, std::unique_ptr<std::mutex>> mutexMap;
+  static synchronized_ref<vk::Queue> getQueue(vk::Device device, uint32_t queueFamily, uint32_t queueIndex)
+  {
+    using Request = std::tuple<vk::Device, uint32_t, uint32_t>;
+    static std::map<Request, synchronized_ref<vk::Queue>> allQueues;
     static std::mutex mtx;
     std::lock_guard<std::mutex> lg(mtx);
-    auto it = mutexMap.find(queue);
-    if(it == mutexMap.end()) {
-      it = mutexMap.insert({queue, std::unique_ptr<std::mutex>(new std::mutex)})
-               .first;
+    auto it = allQueues.find({device, queueFamily, queueIndex});
+    if (it == allQueues.end()) {
+      it = allQueues.insert( { {device, queueFamily, queueIndex},
+                               {device.getQueue(queueFamily, queueIndex),
+                             new std::mutex{}}}).first;
     }
-    return *it->second;
+    return it->second;
   }
+
 private:
   vk::UniqueInstance instance_;
   vku::DebugCallback callback_;
@@ -270,8 +264,8 @@ private:
   vk::UniqueDescriptorPool descriptorPool_;
   uint32_t graphicsQueueFamilyIndex_;
   uint32_t computeQueueFamilyIndex_;
-  vk::Queue graphicsQueue_;
-  vk::Queue computeQueue_;
+  synchronized_ref<vk::Queue> graphicsQueue_;
+  synchronized_ref<vk::Queue> computeQueue_;
   vk::PhysicalDeviceMemoryProperties memprops_;
   bool ok_ = false;
 };
@@ -586,7 +580,7 @@ public:
 
   /// Get the queue used to submit graphics jobs
   synchronized_ref<vk::Queue> presentQueue() const {
-    return { presentQueue_, Framework::getMutexForQueue(presentQueue_) };
+    return Framework::getQueue(device_, presentQueueFamily_, 0);
   }
 
   /// Return true if this window was created sucessfully.
