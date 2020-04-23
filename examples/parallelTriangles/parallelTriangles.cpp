@@ -120,6 +120,8 @@ void WindowWorker::operator()()
   update.update(device);
 
   auto graphicsQueue = fw.graphicsQueue();
+  auto ow = window.width();
+  auto oh = window.height();
   while (!finished) {
     u.rotation = glm::rotate(u.rotation, glm::radians(1.0f), glm::vec3(0, 0, 1));
     u.colour.r = std::sin(frame * 0.01f);
@@ -133,6 +135,11 @@ void WindowWorker::operator()()
           device, graphicsQueue,
           [&](vk::CommandBuffer cb, int imageIndex,
               vk::RenderPassBeginInfo &rpbi) {
+            if (ow != window.width()) {
+              ow = window.width();
+              oh = window.height();
+              pipeline = buildPipeline();
+            }
             vk::CommandBufferBeginInfo bi{};
             cb.begin(bi);
             // Instead of pushConstants() we use updateBuffer()
