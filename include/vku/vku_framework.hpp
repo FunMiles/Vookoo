@@ -669,6 +669,7 @@ public:
       device_.destroyFence(f);
     }
     swapchain_ = vk::UniqueSwapchainKHR{};
+    instance_.destroySurfaceKHR(surface_);
   }
 
   Window &operator=(Window &&rhs) = default;

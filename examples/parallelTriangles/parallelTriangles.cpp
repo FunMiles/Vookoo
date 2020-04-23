@@ -25,26 +25,26 @@ const std::vector<Vertex> vertices = {
     {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
 };
 
-struct TestWindowWorker {
-  TestWindowWorker(vku::Framework &fw, GLFWwindow *glfwwindow,
+struct WindowWorker {
+  WindowWorker(vku::Framework &fw, GLFWwindow *glfwwindow,
                    const char *title)
       : glfwwindow(glfwwindow), fw(fw),
-        device(fw.device())
+        device(fw.device()),
+        window{fw.instance(), device, fw.physicalDevice(),
+               fw.graphicsQueueFamilyIndex(), glfwwindow}
   {
-    window = vku::Window{fw.instance(), device, fw.physicalDevice(),
-                         fw.graphicsQueueFamilyIndex(), glfwwindow};
   }
 
   void operator()();
 
   GLFWwindow *glfwwindow;
   vku::Framework &fw;
-  vku::Window window;
   vk::Device device;
+  vku::Window window;
   std::atomic<bool> finished{false};
 };
 
-void TestWindowWorker::operator()()
+void WindowWorker::operator()()
 {
   // Create two shaders, vertex and fragment. See the files
   // uniparallelTrianglesforms.vert and parallelTriangles.frag for details.
@@ -126,8 +126,7 @@ void TestWindowWorker::operator()()
     u.colour.g = std::cos(frame * 0.01f);
     frame++;
     {
-//      std::lock_guard<std::mutex> lg(gl_mtx);
-      // draw one triangle.
+      // draw one rotating triangle.
       // Unlike helloTriangle, we generate the command buffer dynamicly
       // because it will contain different values on each frame.
       window.draw(
@@ -162,9 +161,9 @@ void TestWindowWorker::operator()()
     // Very crude method to prevent your GPU from overheating.
     std::this_thread::sleep_for(std::chrono::milliseconds(16));
   }
-  std::cout << "Done and exiting" << std::endl;
-  // Wait until all drawing is done and then kill the window.
-  device.waitIdle();
+  // Wait until all drawing is done.
+  auto umax = std::numeric_limits<uint64_t>::max();
+  device.waitForFences(window.commandBufferFences(), 1, umax);
 }
 
 int main() {
@@ -185,23 +184,34 @@ int main() {
     // Initialise the Vookoo demo framework.
     vku::Framework fw{title};
     if (!fw.ok()) {
-      std::cout << "Framework creation failed" << std::endl;
+      std::cerr << "Framework creation failed" << std::endl;
       exit(1);
     }
 
     // Get a device from the demo framework.
     vk::Device device = fw.device();
 
-    TestWindowWorker ww{fw, glfwwindow, title};
+    WindowWorker ww{fw, glfwwindow, title};
     std::thread wt([&ww] { ww(); });
 
-
-    TestWindowWorker ww2{fw, glfwwindow2, title};
+    WindowWorker ww2{fw, glfwwindow2, title};
     std::thread wt2([&ww2] { ww2(); });
     // Loop waiting for the window to close.
-    while (!glfwWindowShouldClose(glfwwindow)) {
+    int activeWindows = 2;
+    while (activeWindows > 0) {
       glfwPollEvents();
-
+      if(!ww.finished && glfwWindowShouldClose(glfwwindow)) {
+        ww.finished = true;
+        wt.join();
+        glfwDestroyWindow(glfwwindow);
+        --activeWindows;
+      }
+      if(!ww2.finished && glfwWindowShouldClose(glfwwindow2)) {
+        ww2.finished = true;
+        wt2.join();
+        glfwDestroyWindow(glfwwindow2);
+        --activeWindows;
+      }
       // Very crude method to prevent your GPU from overheating.
       std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
@@ -210,7 +220,6 @@ int main() {
     device.waitIdle();
     // The Framework and Window objects will be destroyed here.
   }
-  glfwDestroyWindow(glfwwindow);
   glfwTerminate();
   return 0;
 }
