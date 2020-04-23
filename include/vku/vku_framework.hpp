@@ -49,10 +49,42 @@
 #include <map>
 #include <tuple>
 
-#include <vulkan/vulkan.hpp>
+#include <set>
 #include <vku/vku.hpp>
+#include <vulkan/vulkan.hpp>
 
 namespace vku {
+
+
+template <class F>
+class final_act
+{
+public:
+  explicit final_act(F f) noexcept
+      : f_(std::move(f)), invoke_(true) {}
+
+  final_act(final_act&& other) noexcept
+      : f_(std::move(other.f_)),
+        invoke_(other.invoke_)
+  {
+    other.invoke_ = false;
+  }
+
+  final_act(const final_act&) = delete;
+  final_act& operator=(const final_act&) = delete;
+
+  ~final_act() noexcept
+  {
+    if (invoke_) f_();
+  }
+
+private:
+  F f_;
+  bool invoke_;
+};
+
+template <typename F>
+final_act<F> on_death(F &&f) { return final_act<F>{std::forward<F>(f)}; }
 
 template <typename T>
 class locked_access {
@@ -116,6 +148,7 @@ public:
 
   // Construct a framework containing the instance, a device and one or more queues.
   Framework(const std::string &name) {
+    livePools_ = std::make_shared<SyncDescriptors>();
     vku::InstanceMaker im{};
     im.defaultLayers();
     instance_ = im.createUnique();
@@ -172,15 +205,6 @@ public:
     poolSizes.emplace_back(vk::DescriptorType::eCombinedImageSampler, 128);
     poolSizes.emplace_back(vk::DescriptorType::eStorageBuffer, 128);
 
-    // Create an arbitrary number of descriptors in a pool.
-    // Allow the descriptors to be freed, possibly not optimal behaviour.
-    vk::DescriptorPoolCreateInfo descriptorPoolInfo{};
-    descriptorPoolInfo.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
-    descriptorPoolInfo.maxSets = 256;
-    descriptorPoolInfo.poolSizeCount = (uint32_t)poolSizes.size();
-    descriptorPoolInfo.pPoolSizes = poolSizes.data();
-    descriptorPool_ = device_->createDescriptorPoolUnique(descriptorPoolInfo);
-
     graphicsQueue_ = Framework::getQueue(*device_, graphicsQueueFamilyIndex_, 0);
     computeQueue_  = Framework::getQueue(*device_, computeQueueFamilyIndex_, 0);;
     ok_ = true;
@@ -232,10 +256,26 @@ public:
       descriptorPoolInfo.maxSets = 256;
       descriptorPoolInfo.poolSizeCount = (uint32_t)poolSizes.size();
       descriptorPoolInfo.pPoolSizes = poolSizes.data();
-      return device_->createDescriptorPoolUnique(descriptorPoolInfo);
+      auto descPool = device_->createDescriptorPoolUnique(descriptorPoolInfo);
+      auto result = *descPool;
+      auto threadID = std::this_thread::get_id();
+      {
+        std::lock_guard<std::mutex> lockGuard(livePools_->first);
+        livePools_->second.insert({threadID, std::move(descPool)});
+      }
+      std::weak_ptr<SyncDescriptors> weakLivePools{livePools_};
+      thread_local auto cleanup = on_death(
+          [threadID, weakLivePools]{
+            auto livePools = weakLivePools.lock();
+            if(livePools)
+              livePools->second.erase(threadID);
+          }
+          );
+      return result;
     };
-    thread_local vk::UniqueDescriptorPool desc_pool = makeDescPool();
-    return *desc_pool;
+
+    thread_local vk::DescriptorPool desc_pool = makeDescPool();
+    return desc_pool;
   }
 
   /// Get the family index for the graphics queues.
@@ -253,9 +293,8 @@ public:
       if (pipelineCache_) {
         pipelineCache_.reset();
       }
-      if (descriptorPool_) {
-        descriptorPool_.reset();
-      }
+      std::lock_guard<std::mutex> lockGuard(livePools_->first);
+      livePools_->second.clear();
       device_.reset();
     }
 
@@ -292,7 +331,8 @@ private:
   //vk::DebugReportCallbackEXT callback_;
   vk::PhysicalDevice physical_device_;
   vk::UniquePipelineCache pipelineCache_;
-  vk::UniqueDescriptorPool descriptorPool_;
+  using SyncDescriptors = std::pair<std::mutex,std::map<std::thread::id, vk::UniqueDescriptorPool>>;
+  std::shared_ptr<SyncDescriptors> livePools_;
   uint32_t graphicsQueueFamilyIndex_;
   uint32_t computeQueueFamilyIndex_;
   SynchronizedQueue graphicsQueue_;
