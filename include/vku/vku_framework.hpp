@@ -122,17 +122,20 @@ private:
 class SynchronizedQueue : public synchronized_ref<vk::Queue> {
 public:
   using synchronized_ref<vk::Queue>::synchronized_ref;
-  template <typename Dispatch=VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
-  void submit(uint32_t submitCount, const vk::SubmitInfo *submits, vk::Fence fence, Dispatch const &d = Dispatch{}) const {
+  template <typename Dispatch = VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
+  void submit(uint32_t submitCount, const vk::SubmitInfo *submits,
+              vk::Fence fence, Dispatch const &d = Dispatch{}) const {
     this->operator->()->submit(submitCount, submits, fence, d);
   }
-  template <typename Dispatch=VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
-  void submit(vk::ArrayProxy<const vk::SubmitInfo> submits, vk::Fence fence, Dispatch const &d = Dispatch{}) const {
+  template <typename Dispatch = VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
+  void submit(vk::ArrayProxy<const vk::SubmitInfo> submits, vk::Fence fence,
+              Dispatch const &d = Dispatch{}) const {
     this->operator->()->submit(submits, fence, d);
   }
 
-  template <typename Dispatch=VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
-  vk::Result presentKHR(const vk::PresentInfoKHR &presentInfo, Dispatch const &d = Dispatch{}) const {
+  template <typename Dispatch = VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
+  vk::Result presentKHR(const vk::PresentInfoKHR &presentInfo,
+                        Dispatch const &d = Dispatch{}) const {
     return this->operator->()->presentKHR(presentInfo, d);
   }
 };
@@ -264,13 +267,11 @@ public:
         livePools_->second.insert({threadID, std::move(descPool)});
       }
       std::weak_ptr<SyncDescriptors> weakLivePools{livePools_};
-      thread_local auto cleanup = on_death(
-          [threadID, weakLivePools]{
-            auto livePools = weakLivePools.lock();
-            if(livePools)
-              livePools->second.erase(threadID);
-          }
-          );
+      thread_local auto cleanup = on_death([threadID, weakLivePools] {
+        auto livePools = weakLivePools.lock();
+        if (livePools)
+          livePools->second.erase(threadID);
+      });
       return result;
     };
 
@@ -317,9 +318,11 @@ public:
     std::lock_guard<std::mutex> lg(mtx);
     auto it = allQueues.find({device, queueFamily, queueIndex});
     if (it == allQueues.end()) {
-      it = allQueues.insert( { {device, queueFamily, queueIndex},
-                               {device.getQueue(queueFamily, queueIndex),
-                             new std::mutex{}}}).first;
+      it = allQueues
+               .insert({{device, queueFamily, queueIndex},
+                        {device.getQueue(queueFamily, queueIndex),
+                         new std::mutex{}}})
+               .first;
     }
     return it->second;
   }
@@ -427,22 +430,26 @@ public:
 
     createDepthStencil();
 
-	  createRenderPass();
+    createRenderPass();
 
-	  createFrameBuffers();
+    createFrameBuffers();
 
-	  vk::SemaphoreCreateInfo sci;
+    vk::SemaphoreCreateInfo sci;
     imageAcquireSemaphore_ = device.createSemaphoreUnique(sci);
     commandCompleteSemaphore_ = device.createSemaphoreUnique(sci);
     dynamicSemaphore_ = device.createSemaphoreUnique(sci);
 
     typedef vk::CommandPoolCreateFlagBits ccbits;
 
-    vk::CommandPoolCreateInfo cpci{ ccbits::eTransient|ccbits::eResetCommandBuffer, graphicsQueueFamilyIndex };
+    vk::CommandPoolCreateInfo cpci{ccbits::eTransient |
+                                       ccbits::eResetCommandBuffer,
+                                   graphicsQueueFamilyIndex};
     commandPool_ = device.createCommandPoolUnique(cpci);
 
     // Create static draw buffers
-    vk::CommandBufferAllocateInfo cbai{ *commandPool_, vk::CommandBufferLevel::ePrimary, (uint32_t)framebuffers_.size() };
+    vk::CommandBufferAllocateInfo cbai{*commandPool_,
+                                       vk::CommandBufferLevel::ePrimary,
+                                       (uint32_t)framebuffers_.size()};
     staticDrawBuffers_ = device.allocateCommandBuffersUnique(cbai);
     dynamicDrawBuffers_ = device.allocateCommandBuffersUnique(cbai);
 
@@ -582,9 +589,9 @@ public:
     presentInfo.waitSemaphoreCount = 1;
     presentInfo.pWaitSemaphores = &ccSema;
     try {
-    presentQueue_.presentKHR(presentInfo);
+      presentQueue_.presentKHR(presentInfo);
     } catch (const vk::OutOfDateKHRError &e) {
-    	recreate();
+      recreate();
     }
   }
 
@@ -665,7 +672,7 @@ public:
         pms.end()) {
       presentMode = vk::PresentModeKHR::eFifo;
     } else {
-      std::cout << "No fifo mode available\n";
+      std::cerr << "No fifo mode available\n";
       return;
     }
 
