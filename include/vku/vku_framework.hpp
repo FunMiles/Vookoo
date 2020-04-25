@@ -52,6 +52,27 @@
 #include <set>
 #include <vku/vku.hpp>
 #include <vulkan/vulkan.hpp>
+#define RDTSC
+#ifdef RDTSC
+//  Windows
+#ifdef _WIN32
+
+#include <intrin.h>
+uint64_t rdtsc(){
+   return __rdtsc();
+}
+
+//  Linux/GCC
+#else
+static inline unsigned long long rdtsc() {
+  unsigned hi, lo;
+  __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
+  return ((unsigned long long)lo) | (((unsigned long long)hi) << 32);
+}
+#endif // _WIN32
+#else
+static inline unsigned long long rdtsc() { return 0; }
+#endif
 
 namespace vku {
 
@@ -579,8 +600,19 @@ public:
     staticSubmit.pCommandBuffers = &cb;
     staticSubmit.signalSemaphoreCount = 1;
     staticSubmit.pSignalSemaphores = &ccSema;
-    graphicsQueue.submit({dynamicSubmit,staticSubmit}, cbFence);
-
+    thread_local unsigned long long t = 0;
+    thread_local int cnt = 0;
+    auto t0 = rdtsc();
+    graphicsQueue.submit({dynamicSubmit, staticSubmit}, cbFence);
+    auto t1 = rdtsc();
+    t += t1 - t0;
+    if (++cnt % 100 == 0) {
+      static std::mutex dmtx;
+      std::lock_guard<std::mutex> lg(dmtx);
+      std::cout << "Time: " << (t / cnt) << std::endl;
+      cnt = 0;
+      t = 0;
+    }
     vk::PresentInfoKHR presentInfo;
     vk::SwapchainKHR swapchain = *swapchain_;
     presentInfo.pSwapchains = &swapchain;
